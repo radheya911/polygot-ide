@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Polyglot — Code Language Converter</title>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+--bg:#f6f7f9;--card:#fff;--tx:#14171c;--mut:#6a7280;--bd:#dfe3e8;--ac:#4f46e5;--acx:#fff;--err:#c62828;--ok:#2e7d32}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){color-scheme:dark;--bg:#0f1115;--card:#181b21;--tx:#e8eaee;--mut:#98a0ad;--bd:#2a2f38;--ac:#818cf8;--acx:#10121a;--err:#ef9a9a;--ok:#81c784}}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0f1115;--card:#181b21;--tx:#e8eaee;--mut:#98a0ad;--bd:#2a2f38;--ac:#818cf8;--acx:#10121a;--err:#ef9a9a;--ok:#81c784}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font-family:Geist,system-ui,-apple-system,"Segoe UI",sans-serif;font-size:15px}
+.wrap{max-width:960px;margin:0 auto;padding:16px}
+header{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:16px;flex-wrap:wrap}
+h1{font-size:20px;margin:0}
+h1 small{display:block;font-size:12px;font-weight:400;color:var(--mut)}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:16px}
+label{display:block;font-size:12px;color:var(--mut);margin:10px 0 4px}
+input,select,textarea,button{font:inherit;color:var(--tx)}
+input,select,textarea{width:100%;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:10px}
+textarea{font-family:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;font-size:13px;min-height:220px;resize:vertical}
+button{background:var(--ac);color:var(--acx);border:0;border-radius:8px;padding:10px 16px;font-weight:600;cursor:pointer}
+button.sec{background:transparent;color:var(--tx);border:1px solid var(--bd)}
+button:disabled{opacity:.5;cursor:default}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:700px){.grid{grid-template-columns:1fr}}
+.msg{font-size:13px;margin-top:8px;min-height:18px}.err{color:var(--err)}.ok{color:var(--ok)}
+.badge{font-size:11px;background:var(--ac);color:var(--acx);border-radius:99px;padding:2px 8px;margin-left:6px}
+.auth{max-width:380px;margin:8vh auto 0}
+.tabs{display:flex;gap:6px;margin-bottom:12px}
+.tabs button{flex:1}
+.hidden{display:none}
+.tb{overflow-x:auto;margin-bottom:12px}.tb button{flex:0 0 auto;white-space:nowrap}
+.note{font-size:12px;color:var(--mut);margin-top:8px}
+.scroll{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:8px;border-bottom:1px solid var(--bd);white-space:nowrap}
+.mt{margin-top:16px}
+a.lnk{color:var(--ac);cursor:pointer;font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+<script>
+(function(){
+"use strict";
+/* OWNER CONFIG: replace the 3 values below (see README "Set up the owner account").
+   hash = SHA-256 of your password, as lowercase hex. Leave as-is to disable owner login. */
+var OWNER={username:"admin",email:"admin@example.com",
+ hash:"REPLACE_WITH_SHA256_HASH_OF_YOUR_PASSWORD"};
+var LANGS=["Python","JavaScript","TypeScript","Java","C","C++","C#","Go","Rust","Kotlin","Swift","PHP","Ruby","Dart","Scala","R","SQL","Bash"];
+var app=document.getElementById("app");
+var session=null, sample=null, busy=false;
+
+function store(k,v){try{if(v===undefined){var r=localStorage.getItem(k);return r?JSON.parse(r):null}localStorage.setItem(k,JSON.stringify(v))}catch(e){return null}}
+function users(){return store("pg_users")||[]}
+async function sha(s){var b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(s));return Array.from(new Uint8Array(b)).map(function(x){return x.toString(16).padStart(2,"0")}).join("")}
+function h(t,a,c){var e=document.createElement(t);if(a)for(var k in a){if(k==="class")e.className=a[k];else if(k==="text")e.textContent=a[k];else e.setAttribute(k,a[k])}(c||[]).forEach(function(x){e.appendChild(x)});return e}
+
+async function login(id,pw){
+  id=id.trim().toLowerCase();var hp=await sha(pw);
+  if((id===OWNER.username||id===OWNER.email)&&hp===OWNER.hash)return{username:OWNER.username,email:OWNER.email,role:"owner"};
+  var u=users().find(function(x){return(x.username.toLowerCase()===id||x.email.toLowerCase()===id)&&x.hash===hp});
+  return u?{username:u.username,email:u.email,role:"user"}:null;
+}
+async function signup(un,em,pw){
+  un=un.trim();em=em.trim().toLowerCase();
+  if(un.length<3)return"Username must be at least 3 characters.";
+  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em))return"Enter a valid email.";
+  if(pw.length<6)return"Password must be at least 6 characters.";
+  var l=users();
+  if(un.toLowerCase()===OWNER.username||em===OWNER.email||l.some(function(x){return x.username.toLowerCase()===un.toLowerCase()||x.email===em}))return"Username or email already taken.";
+  l.push({username:un,email:em,hash:await sha(pw),created:Date.now()});store("pg_users",l);return null;
+}
+
+function renderAuth(){
+  app.textContent="";
+  var mode="in";
+  var card=h("div",{class:"card auth"});
+  var title=h("h1",{text:"Polyglot",});title.appendChild(h("small",{text:"Code Language Converter"}));
+  var tIn=h("button",{text:"Log in"}),tUp=h("button",{class:"sec",text:"Sign up"});
+  var tabs=h("div",{class:"tabs mt"},[tIn,tUp]);
+  var idL=h("label",{text:"Username or email"}),id=h("input",{autocomplete:"username"});
+  var emL=h("label",{text:"Email",class:"hidden"}),em=h("input",{type:"email",class:"hidden"});
+  var pwL=h("label",{text:"Password"}),pw=h("input",{type:"password",autocomplete:"current-password"});
+  var go=h("button",{text:"Log in",style:"width:100%;margin-top:14px"});
+  var msg=h("div",{class:"msg"});
+  function setMode(m){mode=m;var up=m==="up";
+    tIn.className=up?"sec":"";tUp.className=up?"":"sec";
+    idL.textContent=up?"Username":"Username or email";
+    emL.className=up?"":"hidden";em.className=up?"":"hidden";
+    go.textContent=up?"Create account":"Log in";msg.textContent=""}
+  tIn.onclick=function(){setMode("in")};tUp.onclick=function(){setMode("up")};
+  async function submit(){
+    msg.className="msg";msg.textContent="";
+    if(mode==="in"){var u=await login(id.value,pw.value);
+      if(!u){msg.className="msg err";msg.textContent="Wrong username/email or password.";return}
+      session=u;store("pg_session",u);renderMain();
+    }else{var e=await signup(id.value,em.value,pw.value);
+      if(e){msg.className="msg err";msg.textContent=e;return}
+      session={username:id.value.trim(),email:em.value.trim().toLowerCase(),role:"user"};store("pg_session",session);renderMain();}
+  }
+  go.onclick=submit;pw.onkeydown=function(e){if(e.key==="Enter")submit()};
+  [title,tabs,idL,id,emL,em,pwL,pw,go,msg].forEach(function(x){card.appendChild(x)});
+  app.appendChild(card);
+}
+
+function renderMain(){
+  app.textContent="";
+  var title=h("h1",{text:"Polyglot"});title.appendChild(h("small",{text:"Code Language Converter"}));
+  var who=h("span",{text:session.username});
+  if(session.role==="owner")who.appendChild(h("span",{class:"badge",text:"Owner"}));
+  var out=h("button",{class:"sec",text:"Log out"});
+  out.onclick=function(){session=null;store("pg_session",null);renderAuth()};
+  app.appendChild(h("header",{},[title,h("div",{class:"row"},[who,out])]));
+
+  var names=[["conv","Converter"],["fix","Error fixer"]];
+  if(session.role==="owner")names.push(["own","Owner"]);
+  var bar=h("div",{class:"tabs tb"}),pane=h("div"),built={},btns={};
+  app.appendChild(bar);app.appendChild(pane);
+  names.forEach(function(n){var b=h("button",{class:"sec",text:n[1]});btns[n[0]]=b;b.onclick=function(){show(n[0])};bar.appendChild(b)});
+  function show(k){
+    Object.keys(btns).forEach(function(x){btns[x].className=x===k?"":"sec"});
+    Object.keys(built).forEach(function(x){built[x].className="hidden"});
+    if(!built[k]){var d=h("div");pane.appendChild(d);built[k]=d;({conv:convTab,fix:fixTab,own:renderOwner})[k](d)}
+    built[k].className="";
+  }
+  show("conv");
+  function convTab(app){
+  var from=h("select"),to=h("select");
+  ["Auto-detect"].concat(LANGS).forEach(function(l){from.appendChild(h("option",{value:l,text:l}))});
+  LANGS.forEach(function(l){to.appendChild(h("option",{value:l,text:l}))});to.value="JavaScript";
+  var swap=h("button",{class:"sec",text:"⇄",title:"Swap"});
+  var src=h("textarea",{placeholder:"Paste your code here…",spellcheck:"false"});
+  var dst=h("textarea",{placeholder:"Converted code appears here…",spellcheck:"false",readonly:"readonly"});
+  var conv=h("button",{text:"Convert"}),opn=h("button",{class:"sec",text:"Open file"}),sv=h("button",{class:"sec",text:"Save file"}),copy=h("button",{class:"sec",text:"Copy"}),clr=h("button",{class:"sec",text:"Clear"});
+  var msg=h("div",{class:"msg"});
+  swap.onclick=function(){if(from.value==="Auto-detect")return;var f=from.value;from.value=to.value;to.value=f;var s=src.value;src.value=dst.value;dst.value=s};
+  opn.onclick=function(){openFile(function(name,text){src.value=text;var l=langFromName(name);if(l&&LANGS.indexOf(l)>-1)from.value=l;msg.className="msg ok";msg.textContent="Opened "+name})};
+  sv.onclick=async function(){
+    if(!dst.value){msg.className="msg err";msg.textContent="Nothing to save yet.";return}
+    var d=null;try{d=await claude.use("downloads")}catch(e){}
+    if(!d){msg.className="msg err";msg.textContent="Saving isn't available here; use Copy.";return}
+    function ok(n){msg.className="msg ok";msg.textContent="Saved as "+n}
+    function bad(){msg.className="msg err";msg.textContent="Couldn't save. Use Copy instead."}
+    var n="converted."+(EXTOF[to.value]||"txt");
+    try{await d.save({filename:n,data:dst.value});ok(n)}
+    catch(e){
+      if(e&&e.code==="declined")return;
+      if(e&&e.code==="rejected_extension"){try{await d.save({filename:"converted.txt",data:dst.value});ok("converted.txt")}catch(e2){if(!e2||e2.code!=="declined")bad()}}
+      else bad();
+    }
+  };
+  clr.onclick=function(){src.value="";dst.value="";msg.textContent=""};
+  copy.onclick=function(){if(!dst.value)return;navigator.clipboard.writeText(dst.value).then(function(){msg.className="msg ok";msg.textContent="Copied."},function(){dst.select();msg.textContent="Press Ctrl/Cmd+C to copy."})};
+  conv.onclick=async function(){
+    if(busy)return;
+    if(!src.value.trim()){msg.className="msg err";msg.textContent="Paste some code first.";return}
+    if(from.value!=="Auto-detect"&&from.value===to.value){msg.className="msg err";msg.textContent="Source and target are the same.";return}
+    if(!sample){try{sample=await claude.use("sample")}catch(e){sample=null}}
+    if(!sample){msg.className="msg err";msg.textContent="Conversion needs Claude, which is unavailable in this view.";return}
+    busy=true;conv.disabled=true;msg.className="msg";msg.textContent="Converting…";dst.value="";
+    var prompt="Convert the following code from "+(from.value==="Auto-detect"?"its detected language":from.value)+" to "+to.value+". Use idiomatic "+to.value+", keep behavior and comments equivalent. Output ONLY the converted code, no markdown fences, no explanation.\n\n<code>\n"+src.value+"\n</code>";
+    try{
+      var r=await sample(prompt,{modelTier:"default",cache:false,onText:function(t){dst.value=t.text.replace(/^```\w*\n?|```\s*$/g,"")}});
+      dst.value=r.text.replace(/^```\w*\n?|\n?```\s*$/g,"");
+      msg.className="msg ok";msg.textContent="Done.";
+      var hist=store("pg_hist_"+session.username)||[];
+      hist.unshift({t:Date.now(),f:from.value,to:to.value});store("pg_hist_"+session.username,hist.slice(0,50));
+    }catch(e){msg.className="msg err";msg.textContent=(e&&e.code==="not_granted")?"Permission to use Claude was declined.":"Conversion failed. Try again."}
+    busy=false;conv.disabled=false;
+  };
+  var left=h("div",{},[h("label",{text:"From"}),from,h("label",{text:"Source code"}),src]);
+  var right=h("div",{},[h("label",{text:"To"}),h("div",{class:"row"},[to,swap]),h("label",{text:"Result"}),dst]);
+  to.style.flex="1";
+  var main=h("div",{class:"card"},[h("div",{class:"grid"},[left,right]),h("div",{class:"row mt"},[conv,opn,sv,copy,clr]),msg]);
+  app.appendChild(main);
+  }
+}
+
+var EXTOF={Python:"py",JavaScript:"js",TypeScript:"ts",Java:"java",C:"c","C++":"cpp","C#":"cs",Go:"go",Rust:"rs",Kotlin:"kt",Swift:"swift",PHP:"php",Ruby:"rb",Dart:"dart",Scala:"scala",R:"r",SQL:"sql",Bash:"sh"};
+var EXT={py:"Python",js:"JavaScript",jsx:"JavaScript",ts:"TypeScript",tsx:"TypeScript",java:"Java",c:"C",h:"C",cpp:"C++",cc:"C++",cs:"C#",go:"Go",rs:"Rust",kt:"Kotlin",swift:"Swift",php:"PHP",rb:"Ruby",dart:"Dart",scala:"Scala",r:"R",sql:"SQL",sh:"Bash",html:"HTML",htm:"HTML",css:"CSS"};
+function langFromName(n){var m=/\.([a-z0-9]+)$/i.exec(n);return m?EXT[m[1].toLowerCase()]||null:null}
+function openFile(cb){
+  var i=document.createElement("input");i.type="file";
+  i.accept="."+Object.keys(EXT).join(",.")+",.txt,.json,.xml";
+  i.onchange=function(){var f=i.files[0];if(!f)return;if(f.size>2000000){alert("File too large (2 MB max).");return}
+    var r=new FileReader();r.onload=function(){cb(f.name,String(r.result))};r.onerror=function(){alert("Could not read file.")};r.readAsText(f)};
+  i.click();
+}
+async function getSample(){if(!sample){try{sample=await claude.use("sample")}catch(e){sample=null}}return sample}
+function unfence(t){return t.replace(/^\s*```[\w+-]*\n?/,"").replace(/\n?```\s*$/,"")}
+
+function fixTab(app){
+  var lang=h("select");["Auto-detect"].concat(LANGS,["HTML","CSS"]).forEach(function(l){lang.appendChild(h("option",{value:l,text:l}))});
+  var code=h("textarea",{placeholder:"Paste code that has errors…",spellcheck:"false"});
+  var err=h("textarea",{placeholder:"Optional: paste the error message or stack trace",spellcheck:"false",style:"min-height:90px"});
+  var out=h("textarea",{placeholder:"Corrected code appears here…",spellcheck:"false",readonly:"readonly"});
+  var notes=h("div",{class:"msg",style:"white-space:pre-wrap"});
+  var go=h("button",{text:"Fix errors"}),opn=h("button",{class:"sec",text:"Open file"}),cp=h("button",{class:"sec",text:"Copy fixed"}),use=h("button",{class:"sec",text:"Use fixed as input"});
+  var msg=h("div",{class:"msg"});
+  opn.onclick=function(){openFile(function(n,t){code.value=t;var l=langFromName(n);if(l)lang.value=l;msg.className="msg ok";msg.textContent="Opened "+n})};
+  cp.onclick=function(){if(out.value)navigator.clipboard.writeText(out.value).then(function(){msg.className="msg ok";msg.textContent="Copied."},function(){})};
+  use.onclick=function(){if(out.value){code.value=out.value;out.value="";notes.textContent=""}};
+  go.onclick=async function(){
+    if(busy)return;
+    if(!code.value.trim()){msg.className="msg err";msg.textContent="Paste or open some code first.";return}
+    var s=await getSample();
+    if(!s){msg.className="msg err";msg.textContent="Fixing needs Claude, which is unavailable in this view.";return}
+    busy=true;go.disabled=true;msg.className="msg";msg.textContent="Analyzing…";out.value="";notes.textContent="";
+    var p="Find and fix all syntax errors, runtime bugs and obvious logic mistakes in this "+(lang.value==="Auto-detect"?"code (detect the language)":lang.value+" code")+". Keep the original structure and style; change only what is needed."+(err.value.trim()?"\n\nError message reported:\n"+err.value:"")+"\n\n<code>\n"+code.value+"\n</code>\n\nReply in exactly this format, with no markdown fences:\nFIXED CODE:\n<the complete corrected code>\n===CHANGES===\n<short bullet list of what was wrong and what you changed>";
+    function split(t){var i=t.indexOf("===CHANGES===");var c=(i<0?t:t.slice(0,i)).replace(/^\s*FIXED CODE:\s*\n?/,"");return[unfence(c),i<0?"":t.slice(i+13).trim()]}
+    try{
+      var r=await s(p,{modelTier:"default",cache:false,onText:function(t){var x=split(t.text);out.value=x[0];notes.textContent=x[1]}});
+      var x=split(r.text);out.value=x[0];notes.textContent=x[1]?"What changed:\n"+x[1]:"";
+      msg.className="msg ok";msg.textContent="Done.";
+    }catch(e){msg.className="msg err";msg.textContent=(e&&e.code==="not_granted")?"Permission to use Claude was declined.":"Fix failed. Try again."}
+    busy=false;go.disabled=false;
+  };
+  var left=h("div",{},[h("label",{text:"Language"}),lang,h("label",{text:"Code with errors"}),code,h("label",{text:"Error message (optional)"}),err]);
+  var right=h("div",{},[h("label",{text:"Corrected code"}),out,notes]);
+  app.appendChild(h("div",{class:"card"},[h("div",{class:"grid"},[left,right]),h("div",{class:"row mt"},[go,opn,cp,use]),msg]));
+}
+
+function renderOwner(app){
+  var card=h("div",{class:"card"});
+  card.appendChild(h("h1",{text:"Owner panel"}));
+  var stats=h("div",{class:"row mt"}),wrap=h("div",{class:"scroll mt"});card.appendChild(stats);
+  function draw(){
+    wrap.textContent="";var l=users();
+    var cv=l.concat([{username:OWNER.username}]).reduce(function(a,u){return a+(store("pg_hist_"+u.username)||[]).length},0);
+    stats.textContent="";[["Total accounts",l.length+1],["Regular users",l.length],["Conversions",cv]].forEach(function(s){stats.appendChild(h("div",{class:"card",style:"padding:10px 16px"},[h("div",{text:String(s[1]),style:"font-size:22px;font-weight:600"}),h("div",{class:"note",text:s[0],style:"margin:0"})]))});
+    var t=h("table"),hd=h("tr");["Username","Email","Joined","Conversions",""].forEach(function(x){hd.appendChild(h("th",{text:x}))});t.appendChild(hd);
+    var all=[{username:OWNER.username,email:OWNER.email,created:null,owner:true}].concat(l);
+    all.forEach(function(u){
+      var tr=h("tr");
+      tr.appendChild(h("td",{text:u.username+(u.owner?" (owner)":"")}));
+      tr.appendChild(h("td",{text:u.email}));
+      tr.appendChild(h("td",{text:u.created?new Date(u.created).toLocaleDateString():"—"}));
+      tr.appendChild(h("td",{text:String((store("pg_hist_"+u.username)||[]).length)}));
+      var td=h("td");
+      if(!u.owner){var d=h("button",{class:"sec",text:"Remove"});d.onclick=function(){if(confirm("Remove "+u.username+"?")){store("pg_users",users().filter(function(x){return x.username!==u.username}));draw()}};td.appendChild(d)}
+      tr.appendChild(td);t.appendChild(tr);
+    });
+    wrap.appendChild(t);
+  }
+  draw();card.appendChild(wrap);
+  card.appendChild(h("div",{class:"msg",text:"Accounts are stored in this browser only (no server)."}));
+  app.appendChild(card);
+}
+
+session=store("pg_session");
+if(session&&session.username)renderMain();else renderAuth();
+})();
+</script>
+</body>
